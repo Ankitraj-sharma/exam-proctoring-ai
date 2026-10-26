@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  proctor-ai:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: proctor_ai_app
+    ports:
+      - "8501:8501"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - STREAMLIT_SERVER_HEADLESS=true
+      - STREAMLIT_SERVER_ENABLE_CORS=false
+    devices:
+      - "/dev/video0:/dev/video0"
+    restart: unless-stopped
