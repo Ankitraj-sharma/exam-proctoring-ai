@@ -5,7 +5,10 @@ Calculates horizontal and vertical iris gaze ratios to detect off-screen glances
 
 from typing import Tuple, Dict, Any, Optional
 import numpy as np
-import cv2
+try:
+    import cv2
+except ImportError:
+    cv2 = None
 
 
 class EyeGazeTracker:
