@@ -62,9 +62,10 @@ class LiveProctorProcessor(VideoProcessorBase):
         self.active_alert: Optional[str] = None
         self.total_infractions: int = 0
 
-        # Timing
+        # Timing & Caching
         self._frame_count = 0
         self._last_time = time.time()
+        self._cached_objects: list = []
 
     def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
         """Processes each incoming video frame and overlays proctor HUD."""
@@ -82,21 +83,21 @@ class LiveProctorProcessor(VideoProcessorBase):
 
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-        # 1. Multi-Face & Presence Analysis
-        faces = self.face_cascade.detectMultiScale(
-            gray, scaleFactor=1.1, minNeighbors=5, minSize=(80, 80)
+        # 1. Multi-Face & Presence Analysis (Downscaled 2x for ultra-smooth 30+ FPS)
+        small_gray = cv2.resize(gray, (0, 0), fx=0.5, fy=0.5)
+        raw_faces = self.face_cascade.detectMultiScale(
+            small_gray, scaleFactor=1.15, minNeighbors=4, minSize=(40, 40)
         )
-        face_boxes = [tuple(f) for f in faces]
+        face_boxes = [(int(fx * 2), int(fy * 2), int(fw * 2), int(fh * 2)) for (fx, fy, fw, fh) in raw_faces]
         presence_res = self.presence_tracker.analyze_faces(img, face_boxes)
 
         pose_res = {"is_deviated": False, "direction": "FORWARD", "yaw": 0.0, "pitch": 0.0}
         gaze_res = {"is_looking_away": False, "gaze_state": "CENTER"}
 
-        if len(faces) > 0:
-            fx, fy, fw, fh = faces[0]
+        if len(face_boxes) > 0:
+            fx, fy, fw, fh = face_boxes[0]
 
             # Approximate 6 key facial landmarks for solvePnP head pose:
-            # [nose, chin, left_eye, right_eye, left_mouth, right_mouth]
             nose = np.array([fx + fw * 0.5, fy + fh * 0.6])
             chin = np.array([fx + fw * 0.5, fy + fh * 0.95])
             l_eye = np.array([fx + fw * 0.3, fy + fh * 0.38])
@@ -109,30 +110,30 @@ class LiveProctorProcessor(VideoProcessorBase):
 
             # Eye region gaze estimation
             face_roi_gray = gray[fy:fy + int(fh * 0.55), fx:fx + fw]
-            eyes = self.eye_cascade.detectMultiScale(face_roi_gray, scaleFactor=1.1, minNeighbors=3, minSize=(20, 20))
+            if face_roi_gray.size > 0:
+                eyes = self.eye_cascade.detectMultiScale(face_roi_gray, scaleFactor=1.15, minNeighbors=3, minSize=(20, 20))
 
-            if len(eyes) >= 2:
-                # Sort eyes by x coordinate
-                eyes = sorted(eyes, key=lambda e: e[0])
-                lex, ley, lew, leh = eyes[0]
-                rex, rey, rew, reh = eyes[1]
+                if len(eyes) >= 2:
+                    eyes = sorted(eyes, key=lambda e: e[0])
+                    lex, ley, lew, leh = eyes[0]
+                    rex, rey, rew, reh = eyes[1]
 
-                l_eye_pts = np.array([
-                    [fx + lex, fy + ley + leh // 2],
-                    [fx + lex + lew // 2, fy + ley],
-                    [fx + lex + lew, fy + ley + leh // 2],
-                    [fx + lex + lew // 2, fy + ley + leh]
-                ])
-                r_eye_pts = np.array([
-                    [fx + rex, fy + rey + reh // 2],
-                    [fx + rex + rew // 2, fy + rey],
-                    [fx + rex + rew, fy + rey + reh // 2],
-                    [fx + rex + rew // 2, fy + rey + reh]
-                ])
+                    l_eye_pts = np.array([
+                        [fx + lex, fy + ley + leh // 2],
+                        [fx + lex + lew // 2, fy + ley],
+                        [fx + lex + lew, fy + ley + leh // 2],
+                        [fx + lex + lew // 2, fy + ley + leh]
+                    ])
+                    r_eye_pts = np.array([
+                        [fx + rex, fy + rey + reh // 2],
+                        [fx + rex + rew // 2, fy + rey],
+                        [fx + rex + rew, fy + rey + reh // 2],
+                        [fx + rex + rew // 2, fy + rey + reh]
+                    ])
 
-                l_ratio = self.gaze_tracker.compute_gaze_ratio(l_eye_pts, gray)
-                r_ratio = self.gaze_tracker.compute_gaze_ratio(r_eye_pts, gray)
-                gaze_res = self.gaze_tracker.evaluate_gaze(l_ratio, r_ratio)
+                    l_ratio = self.gaze_tracker.compute_gaze_ratio(l_eye_pts, gray)
+                    r_ratio = self.gaze_tracker.compute_gaze_ratio(r_eye_pts, gray)
+                    gaze_res = self.gaze_tracker.evaluate_gaze(l_ratio, r_ratio)
 
             # Draw Head Pose 3D orientation vector
             if pose_res.get("rvec") is not None:
@@ -144,8 +145,10 @@ class LiveProctorProcessor(VideoProcessorBase):
                     (int(nose[0]), int(nose[1]))
                 )
 
-        # 2. Contraband Object Detection
-        objects_res = self.object_detector.detect_objects(img)
+        # 2. Contraband Object Detection (Every 5th frame to prevent video pipeline freeze)
+        if self._frame_count % 5 == 0:
+            self._cached_objects = self.object_detector.detect_objects(img)
+        objects_res = self._cached_objects
 
         # 3. Fuse in Proctor Engine
         engine_res = self.engine.update(pose_res, gaze_res, presence_res, objects_res)

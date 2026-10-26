@@ -26,8 +26,8 @@ class ProhibitedObjectDetector:
         h, w = frame.shape[:2]
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         
-        # Bilateral filter to smooth texture while preserving sharp edges
-        blurred = cv2.bilateralFilter(gray, 7, 50, 50)
+        # High-speed Gaussian blur (much faster than bilateralFilter for WebRTC)
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
         
         # Canny edge detection
         edges = cv2.Canny(blurred, 50, 150)

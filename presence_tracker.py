@@ -32,7 +32,7 @@ class PresenceTracker:
         Determines candidate count and presence status.
         face_boxes: list of (x, y, w, h)
         """
-        if detected_face_boxes is None or len(detected_face_boxes) == 0:
+        if detected_face_boxes is None:
             # Fallback to Haar Cascade
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             faces = self.face_cascade.detectMultiScale(
