@@ -7,6 +7,7 @@ suspicion decay, and LMS report generators.
 import numpy as np
 from gaze_tracker import EyeGazeTracker
 from proctor_engine import ProctorEngine
+from calibration import ProctorCalibrator
 from export_utils import generate_csv_audit_report, generate_json_audit_package
 
 try:
@@ -104,10 +105,21 @@ def test_export_utilities():
     assert "CS-101" in json_str
 
 
+def test_calibration_pipeline():
+    cal = ProctorCalibrator(sample_size=3)
+    for _ in range(3):
+        cal.add_sample(yaw=3.0, pitch=-2.0, gaze_ratio=1.0)
+    assert cal.is_calibrated
+    dev = cal.get_calibrated_deviation(current_yaw=8.0, current_pitch=-2.0, current_gaze=1.0)
+    assert dev["delta_yaw"] == 5.0
+    assert dev["delta_pitch"] == 0.0
+
+
 if __name__ == "__main__":
     test_head_pose_forward()
     test_eye_gaze_evaluator()
     test_presence_tracker()
     test_proctor_engine_suspicion()
     test_export_utilities()
+    test_calibration_pipeline()
     print("All proctoring engine unit tests passed successfully!")
