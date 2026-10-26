@@ -31,6 +31,34 @@ RTC_CONFIGURATION = RTCConfiguration(
 )
 
 
+def _safe_load_cascade(filename: str):
+    """Safely loads OpenCV cascade without raising AttributeError if cv2.data is missing."""
+    try:
+        if hasattr(cv2, "data") and hasattr(cv2.data, "haarcascades") and cv2.data.haarcascades:
+            cas = cv2.CascadeClassifier(cv2.data.haarcascades + filename)
+            if not cas.empty():
+                return cas
+    except Exception:
+        pass
+    try:
+        import os
+        cv2_dir = os.path.dirname(cv2.__file__)
+        cand = os.path.join(cv2_dir, "data", filename)
+        if os.path.exists(cand):
+            cas = cv2.CascadeClassifier(cand)
+            if not cas.empty():
+                return cas
+    except Exception:
+        pass
+    try:
+        cas = cv2.CascadeClassifier(filename)
+        if not cas.empty():
+            return cas
+    except Exception:
+        pass
+    return None
+
+
 class LiveProctorProcessor(VideoProcessorBase):
     """
     WebRTC VideoProcessor executing continuous anti-cheating computer vision pipeline.
@@ -44,12 +72,8 @@ class LiveProctorProcessor(VideoProcessorBase):
         self.engine = ProctorEngine()
 
         # Haar Cascades for reliable low-latency detection
-        self.face_cascade = cv2.CascadeClassifier(
-            cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-        )
-        self.eye_cascade = cv2.CascadeClassifier(
-            cv2.data.haarcascades + "haarcascade_eye.xml"
-        )
+        self.face_cascade = _safe_load_cascade("haarcascade_frontalface_default.xml")
+        self.eye_cascade = _safe_load_cascade("haarcascade_eye.xml")
 
         # Thread synchronization
         self._lock = threading.Lock()
@@ -85,9 +109,11 @@ class LiveProctorProcessor(VideoProcessorBase):
 
         # 1. Multi-Face & Presence Analysis (Downscaled 2x for ultra-smooth 30+ FPS)
         small_gray = cv2.resize(gray, (0, 0), fx=0.5, fy=0.5)
-        raw_faces = self.face_cascade.detectMultiScale(
-            small_gray, scaleFactor=1.15, minNeighbors=4, minSize=(40, 40)
-        )
+        raw_faces = []
+        if self.face_cascade is not None and not self.face_cascade.empty():
+            raw_faces = self.face_cascade.detectMultiScale(
+                small_gray, scaleFactor=1.15, minNeighbors=4, minSize=(40, 40)
+            )
         face_boxes = [(int(fx * 2), int(fy * 2), int(fw * 2), int(fh * 2)) for (fx, fy, fw, fh) in raw_faces]
         presence_res = self.presence_tracker.analyze_faces(img, face_boxes)
 
@@ -110,7 +136,7 @@ class LiveProctorProcessor(VideoProcessorBase):
 
             # Eye region gaze estimation
             face_roi_gray = gray[fy:fy + int(fh * 0.55), fx:fx + fw]
-            if face_roi_gray.size > 0:
+            if face_roi_gray.size > 0 and self.eye_cascade is not None and not self.eye_cascade.empty():
                 eyes = self.eye_cascade.detectMultiScale(face_roi_gray, scaleFactor=1.15, minNeighbors=3, minSize=(20, 20))
 
                 if len(eyes) >= 2:

@@ -8,6 +8,34 @@ import cv2
 import numpy as np
 
 
+def _safe_load_cascade(filename: str):
+    """Safely loads OpenCV cascade without raising AttributeError if cv2.data is missing."""
+    try:
+        if hasattr(cv2, "data") and hasattr(cv2.data, "haarcascades") and cv2.data.haarcascades:
+            cas = cv2.CascadeClassifier(cv2.data.haarcascades + filename)
+            if not cas.empty():
+                return cas
+    except Exception:
+        pass
+    try:
+        import os
+        cv2_dir = os.path.dirname(cv2.__file__)
+        cand = os.path.join(cv2_dir, "data", filename)
+        if os.path.exists(cand):
+            cas = cv2.CascadeClassifier(cand)
+            if not cas.empty():
+                return cas
+    except Exception:
+        pass
+    try:
+        cas = cv2.CascadeClassifier(filename)
+        if not cas.empty():
+            return cas
+    except Exception:
+        pass
+    return None
+
+
 class PresenceTracker:
     """
     Monitors candidate visual presence and detects unauthorized multiple individuals.
@@ -19,9 +47,7 @@ class PresenceTracker:
         self.consecutive_multi_person_frames = 0
         
         # Load Haar Cascade as high-speed lightweight fallback / validator
-        self.face_cascade = cv2.CascadeClassifier(
-            cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-        )
+        self.face_cascade = _safe_load_cascade("haarcascade_frontalface_default.xml")
 
     def analyze_faces(
         self,
@@ -34,11 +60,13 @@ class PresenceTracker:
         """
         if detected_face_boxes is None:
             # Fallback to Haar Cascade
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            faces = self.face_cascade.detectMultiScale(
-                gray, scaleFactor=1.1, minNeighbors=5, minSize=(60, 60)
-            )
-            detected_face_boxes = [tuple(f) for f in faces]
+            detected_face_boxes = []
+            if self.face_cascade is not None and not self.face_cascade.empty():
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                faces = self.face_cascade.detectMultiScale(
+                    gray, scaleFactor=1.1, minNeighbors=5, minSize=(60, 60)
+                )
+                detected_face_boxes = [tuple(f) for f in faces]
 
         face_count = len(detected_face_boxes)
 
