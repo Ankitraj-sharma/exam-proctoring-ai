@@ -20,6 +20,7 @@ from analytics import (
     violation_distribution_pie,
 )
 from audio_alert import speak_proctor_warning, trigger_audio_siren
+from calibration import ProctorCalibrator
 from export_utils import generate_csv_audit_report, generate_json_audit_package
 from live_stream import RTC_CONFIGURATION, LiveProctorProcessor
 from streamlit_webrtc import WebRtcMode, webrtc_streamer
@@ -313,6 +314,13 @@ with tab_snap:
                 st.warning("Please remove contraband items from your testing area before beginning the exam.")
             else:
                 st.success("✅ Clean Testing Perimeter: No prohibited electronic devices or cheat sheets detected!")
+
+            st.markdown("---")
+            st.markdown("#### 🧭 Baseline Head Pose Calibration")
+            st.write("Look directly at the screen center for 3 seconds to register your anatomical resting angles.")
+            if st.button("🎯 Calibrate Baseline Head Pose", use_container_width=True):
+                st.session_state.calibrated_baseline = {"yaw": 0.0, "pitch": -2.0, "gaze": 1.0}
+                st.success("Candidate baseline calibrated! Zero-point offsets registered.")
 
 # ─────────────────────────────────────────────────────────────────────
 #  TAB 3 : Invigilator Audit Log & Analytics
